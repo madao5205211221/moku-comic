@@ -1,0 +1,16 @@
+{
+  "appId": "com.madao.mokuxia",
+  "appName": "墨匣",
+  "webDir": "dist",
+  "backgroundColor": "#0f0f10",
+  "android": {
+    "backgroundColor": "#0f0f10"
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0f0f10",
+      "overlaysWebView": false
+    }
+  }
+}

@@ -1,0 +1,15 @@
+node_modules
+dist
+.shots
+.DS_Store
+*.log
+
+# 安卓构建产物
+android/app/build
+android/build
+android/.gradle
+android/local.properties
+android/app/*.p12
+android/app/*.jks
+android/app/*.keystore
+android/keystore.properties
