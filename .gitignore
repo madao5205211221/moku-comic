@@ -13,3 +13,6 @@ android/app/*.p12
 android/app/*.jks
 android/app/*.keystore
 android/keystore.properties
+
+# 临时
+.lockgen
