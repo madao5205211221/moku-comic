@@ -241,9 +241,14 @@ input {
 .book-meta {
   font-size: 11px;
   color: var(--text-faint);
-  display: flex;
-  gap: 6px;
   margin-top: -4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-meta span {
+  margin-left: 6px;
 }
 
 /* ---------- 空态 ---------- */
