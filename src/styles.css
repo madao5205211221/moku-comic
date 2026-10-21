@@ -1115,6 +1115,22 @@ input[type='range']::-webkit-slider-thumb {
   transition: width 0.2s;
 }
 
+/* 不知道总数时（原生目录复制阶段）走跑马灯 */
+.loading .line.indeterminate i {
+  width: 34%;
+  transition: none;
+  animation: barSlide 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes barSlide {
+  0% {
+    transform: translateX(-105%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 .loading p {
   margin: 0;
   font-size: 12px;

@@ -29,7 +29,7 @@ function mimeOf(path) {
 }
 
 /** 把 [{path, blob, name}] 组织成章节 */
-function buildChapters(entries) {
+export function buildChapters(entries) {
   const dirs = new Set(entries.map((e) => dirOf(e.path)))
   const flat = dirs.size === 1 && dirs.has('')
   if (flat) {

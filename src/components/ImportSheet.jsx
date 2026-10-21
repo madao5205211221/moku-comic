@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Icon } from './Icons'
 
-export function ImportSheet({ onClose, onFiles }) {
+export function ImportSheet({ onClose, onFiles, onPickFolder, nativeFolder }) {
   const folderRef = useRef(null)
   const imgRef = useRef(null)
   const zipRef = useRef(null)
@@ -14,6 +14,10 @@ export function ImportSheet({ onClose, onFiles }) {
     const files = e.target.files
     if (files && files.length) onFiles(files)
   }
+  const chooseFolder = () => {
+    if (nativeFolder && onPickFolder) onPickFolder()
+    else pick(folderRef)
+  }
 
   return (
     <div className="sheet-mask" onClick={onClose}>
@@ -25,24 +29,28 @@ export function ImportSheet({ onClose, onFiles }) {
           原文件不动，可以自己删。
         </p>
 
+        <button className="opt" onClick={chooseFolder}>
+          <span className="ico">
+            <Icon name="folder" size={20} />
+          </span>
+          <span className="txt">
+            <strong>选一个文件夹</strong>
+            <span>
+              {nativeFolder
+                ? '整个目录自动扫一遍，子文件夹当章节'
+                : '个别机型需改用下方的压缩包方式'}
+            </span>
+          </span>
+          <Icon name="right" size={16} style={{ color: 'var(--text-faint)' }} />
+        </button>
+
         <button className="opt" onClick={() => pick(zipRef)}>
           <span className="ico">
             <Icon name="zip" size={20} />
           </span>
           <span className="txt">
             <strong>选 ZIP / CBZ</strong>
-            <span>最稳的方式，一个包算一本，可多选</span>
-          </span>
-          <Icon name="right" size={16} style={{ color: 'var(--text-faint)' }} />
-        </button>
-
-        <button className="opt" onClick={() => pick(folderRef)}>
-          <span className="ico">
-            <Icon name="folder" size={20} />
-          </span>
-          <span className="txt">
-            <strong>选一个文件夹</strong>
-            <span>文件夹名就是书名，子文件夹自动当章节（个别机型可能不支持）</span>
+            <span>一个压缩包算一本，可多选</span>
           </span>
           <Icon name="right" size={16} style={{ color: 'var(--text-faint)' }} />
         </button>

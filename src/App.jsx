@@ -3,7 +3,8 @@ import { Capacitor } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
 import { StatusBar } from '@capacitor/status-bar'
 import { listBooks, putBook, patchBook, deleteBook, putPages, clearAll, getBook } from './lib/db'
-import { iterDrafts, pickCover, makeThumb } from './lib/importer'
+import { iterDrafts, pickCover, makeThumb, buildChapters } from './lib/importer'
+import { hasNativeFolderPicker, pickFolder, cleanupFolder, readNativeFile } from './lib/folderPicker'
 import { uid } from './lib/util'
 import { STATUS_STYLE } from './lib/themes'
 import { Shelf } from './components/Shelf'
@@ -29,6 +30,8 @@ const PHASE_TEXT = {
   unzip: '正在解压',
   save: '正在存入书架',
   parse: '正在读取',
+  copy: '正在复制图片',
+  read: '正在读取图片',
 }
 
 const isNative = () => Capacitor.isNativePlatform()
@@ -91,6 +94,39 @@ export default function App() {
     })
   }
 
+  /** 把一份草稿写进书架，返回页数 */
+  async function saveDraft(draft) {
+    const chapters = draft.chapters.map((c) => ({ name: c.name, pageCount: c.pages.length }))
+    const totalPages = chapters.reduce((a, c) => a + c.pageCount, 0)
+    if (!totalPages) return 0
+
+    const id = uid()
+    const pages = []
+    draft.chapters.forEach((c, ci) => {
+      c.pages.forEach((p, pi) => pages.push({ chapterIndex: ci, pageIndex: pi, blob: p.blob }))
+    })
+
+    setJob({ phase: 'save', title: draft.title, current: 0, total: pages.length })
+    await putPages(id, pages, (cur, tot) => setJob({ phase: 'save', title: draft.title, current: cur, total: tot }))
+
+    const cover = pickCover(draft.chapters)
+    const thumb = cover ? await makeThumb(cover.blob) : null
+    const sizeBytes = pages.reduce((a, p) => a + (p.blob?.size || 0), 0)
+
+    await putBook({
+      id,
+      title: draft.title,
+      chapters,
+      totalPages,
+      sizeBytes,
+      coverThumb: thumb,
+      addedAt: Date.now(),
+      lastReadAt: null,
+      progress: null,
+    })
+    return totalPages
+  }
+
   async function handleFiles(fileList) {
     setImportOpen(false)
     const warnings = []
@@ -100,36 +136,11 @@ export default function App() {
 
     try {
       for await (const draft of iterDrafts(fileList, (p) => setJob(p), warnings)) {
-        const chapters = draft.chapters.map((c) => ({ name: c.name, pageCount: c.pages.length }))
-        const totalPages = chapters.reduce((a, c) => a + c.pageCount, 0)
-        if (!totalPages) continue
-
-        const id = uid()
-        const pages = []
-        draft.chapters.forEach((c, ci) => {
-          c.pages.forEach((p, pi) => pages.push({ chapterIndex: ci, pageIndex: pi, blob: p.blob }))
-        })
-
-        setJob({ phase: 'save', title: draft.title, current: 0, total: pages.length })
-        await putPages(id, pages, (cur, tot) => setJob({ phase: 'save', title: draft.title, current: cur, total: tot }))
-
-        const cover = pickCover(draft.chapters)
-        const thumb = cover ? await makeThumb(cover.blob) : null
-        const sizeBytes = pages.reduce((a, p) => a + (p.blob?.size || 0), 0)
-
-        await putBook({
-          id,
-          title: draft.title,
-          chapters,
-          totalPages,
-          sizeBytes,
-          coverThumb: thumb,
-          addedAt: Date.now(),
-          lastReadAt: null,
-          progress: null,
-        })
-        added += 1
-        addedPages += totalPages
+        const n = await saveDraft(draft)
+        if (n) {
+          added += 1
+          addedPages += n
+        }
       }
     } catch (e) {
       warnings.push(`导入中断：${e?.message || e}`)
@@ -140,6 +151,64 @@ export default function App() {
     if (added) showToast(`已导入 ${added} 部，共 ${addedPages} 页`)
     if (warnings.length) {
       setTimeout(() => showToast(warnings[0], 5000), added ? 1800 : 0)
+    }
+  }
+
+  /** 原生目录导入：SAF 选目录 → 递归复制 → 读成 Blob → 入库 */
+  async function handleNativeFolder() {
+    setImportOpen(false)
+    let res
+    try {
+      res = await pickFolder((count) => setJob({ phase: 'copy', title: '正在复制图片', current: count, total: 0 }))
+    } catch (e) {
+      setJob(null)
+      const msg = String(e?.message || e)
+      if (/cancel/i.test(msg)) return
+      showToast(msg)
+      return
+    }
+
+    const title = res?.root || '未命名漫画'
+    try {
+      const files = res?.files || []
+      if (!files.length) {
+        showToast('这个文件夹里没找到图片')
+        return
+      }
+
+      const chapters = buildChapters(
+        files.map((f) => ({
+          path: String(f.rel || f.name).replace(/\\/g, '/'),
+          name: f.name,
+          abs: f.abs,
+        })),
+      )
+      const total = chapters.reduce((a, c) => a + c.pages.length, 0)
+
+      const built = []
+      let done = 0
+      for (const ch of chapters) {
+        const pages = []
+        for (const p of ch.pages) {
+          try {
+            pages.push({ name: p.name, blob: await readNativeFile(p.abs) })
+          } catch {}
+          done += 1
+          setJob({ phase: 'read', title, current: done, total })
+          if (done % 10 === 0) await new Promise((r) => setTimeout(r, 0))
+        }
+        built.push({ name: ch.name, pages })
+      }
+
+      const pageCount = await saveDraft({ title, chapters: built })
+      setJob(null)
+      await refresh()
+      showToast(pageCount ? `已导入《${title}》，共 ${pageCount} 页` : '没有可用的页面')
+    } catch (e) {
+      setJob(null)
+      showToast('导入失败：' + (e?.message || e))
+    } finally {
+      cleanupFolder(res?.dir)
     }
   }
 
@@ -356,7 +425,14 @@ export default function App() {
         </div>
       )}
 
-      {importOpen && <ImportSheet onClose={() => setImportOpen(false)} onFiles={handleFiles} />}
+      {importOpen && (
+        <ImportSheet
+          onClose={() => setImportOpen(false)}
+          onFiles={handleFiles}
+          onPickFolder={handleNativeFolder}
+          nativeFolder={hasNativeFolderPicker()}
+        />
+      )}
 
       {job && (
         <div className="sheet-mask" style={{ alignItems: 'center', padding: 24 }}>
@@ -364,11 +440,11 @@ export default function App() {
             <h3>导入中</h3>
             <p className="hint">{PHASE_TEXT[job.phase] || '处理中'}，别切到别的 App，大文件会慢一点。</p>
             <div className="loading">
-              <div className="line">
-                <i style={{ width: `${jobPct}%` }} />
+              <div className={`line ${job.total ? '' : 'indeterminate'}`}>
+                <i style={job.total ? { width: `${jobPct}%` } : undefined} />
               </div>
               <p>
-                {job.title} · {job.current}/{job.total}
+                {job.title} · {job.total ? `${job.current}/${job.total}` : `已复制 ${job.current} 张`}
               </p>
             </div>
           </div>
