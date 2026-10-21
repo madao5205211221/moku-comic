@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Icon } from './Icons'
 import { fmtSize } from '../lib/util'
 import { estimateUsage } from '../lib/db'
+import { THEMES } from '../lib/themes'
 
 function Seg({ value, options, onChange }) {
   return (
@@ -35,6 +36,25 @@ export function Settings({ settings, setSettings, onBack, onClearAll }) {
       </div>
 
       <div className="settings">
+        <div className="group-title">外观</div>
+        <div className="card theme-card">
+          <div className="theme-picker">
+            {THEMES.map((t) => {
+              const on = (settings.theme || 'ink') === t.id
+              return (
+                <button key={t.id} className={`theme-dot ${on ? 'on' : ''}`} onClick={() => set({ theme: t.id })}>
+                  <span className="swatch" style={{ background: t.bg }}>
+                    <i style={{ background: t.top }} />
+                    <em style={{ background: t.accent }} />
+                  </span>
+                  <strong>{t.name}</strong>
+                  <small>{t.desc}</small>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         <div className="group-title">阅读</div>
         <div className="card">
           <div className="row">

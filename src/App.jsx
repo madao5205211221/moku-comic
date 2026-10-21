@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
+import { StatusBar } from '@capacitor/status-bar'
 import { listBooks, putBook, patchBook, deleteBook, putPages, clearAll, getBook } from './lib/db'
 import { iterDrafts, pickCover, makeThumb } from './lib/importer'
 import { uid } from './lib/util'
+import { STATUS_STYLE } from './lib/themes'
 import { Shelf } from './components/Shelf'
 import { Detail } from './components/Detail'
 import { Reader } from './components/Reader'
@@ -10,7 +14,7 @@ import { ImportSheet } from './components/ImportSheet'
 import { Icon } from './components/Icons'
 
 const SETTINGS_KEY = 'moku.settings.v1'
-const DEFAULT_SETTINGS = { direction: 'rtl', bg: 'night', keepAwake: true }
+const DEFAULT_SETTINGS = { direction: 'rtl', bg: 'night', keepAwake: true, theme: 'ink' }
 
 function loadSettings() {
   try {
@@ -27,6 +31,8 @@ const PHASE_TEXT = {
   parse: '正在读取',
 }
 
+const isNative = () => Capacitor.isNativePlatform()
+
 export default function App() {
   const [books, setBooks] = useState([])
   const [view, setView] = useState('shelf')
@@ -37,6 +43,12 @@ export default function App() {
   const [job, setJob] = useState(null)
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
+  const appRef = useRef(null)
+
+  // 给手势和返回键用的最新状态快照
+  const stateRef = useRef({})
+  stateRef.current = { reader, job, importOpen, view }
+  const goBackRef = useRef(() => false)
 
   const refresh = useCallback(async () => {
     const list = await listBooks()
@@ -47,6 +59,21 @@ export default function App() {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // 主题挂到 html 上
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme || 'ink'
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) {
+      const s = STATUS_STYLE[settings.theme] || STATUS_STYLE.ink
+      meta.setAttribute('content', s.color)
+    }
+    if (isNative()) {
+      const s = STATUS_STYLE[settings.theme] || STATUS_STYLE.ink
+      StatusBar.setStyle({ style: s.style }).catch(() => {})
+      StatusBar.setBackgroundColor({ color: s.color }).catch(() => {})
+    }
+  }, [settings.theme])
 
   const showToast = (msg, ms = 2400) => {
     clearTimeout(toastTimer.current)
@@ -141,10 +168,144 @@ export default function App() {
     patchBook(reader.book.id, { progress: p, lastReadAt: Date.now() }).catch(() => {})
   }
 
+  // 层级返回：能退一级就退一级，退到书架根才交回系统
+  const goBack = () => {
+    const s = stateRef.current
+    if (s.job) return true
+    if (s.importOpen) {
+      setImportOpen(false)
+      return true
+    }
+    if (s.reader) {
+      closeReader()
+      return true
+    }
+    if (s.view === 'detail') {
+      setDetail(null)
+      setView('shelf')
+      return true
+    }
+    if (s.view === 'settings') {
+      setView('shelf')
+      return true
+    }
+    return false
+  }
+  goBackRef.current = goBack
+
+  // 安卓物理返回键 / 系统返回手势
+  useEffect(() => {
+    if (!isNative()) return
+    let handle = null
+    CapApp.addListener('backButton', () => {
+      if (!goBackRef.current()) {
+        CapApp.exitApp().catch(() => {})
+      }
+    })
+      .then((h) => (handle = h))
+      .catch(() => {})
+    return () => {
+      try {
+        handle?.remove()
+      } catch {}
+    }
+  }, [])
+
+  // 左右边缘侧滑返回
+  useEffect(() => {
+    const el = appRef.current
+    if (!el) return
+    const EDGE = 26
+    const THRESHOLD = 74
+    let drag = null
+
+    const reset = (animate = true) => {
+      el.style.transition = animate ? 'transform .24s cubic-bezier(.22,1,.36,1)' : 'none'
+      el.style.transform = 'translateX(0)'
+      el.style.boxShadow = ''
+      window.setTimeout(() => {
+        if (!drag) {
+          el.style.transform = ''
+          el.style.transition = ''
+        }
+      }, 260)
+    }
+
+    const onStart = (e) => {
+      const s = stateRef.current
+      if (s.reader || s.job || s.importOpen) return
+      const t = e.touches[0]
+      const w = window.innerWidth
+      let from = 0
+      if (t.clientX <= EDGE) from = 1
+      else if (t.clientX >= w - EDGE) from = -1
+      if (!from) return
+      drag = { from, x0: t.clientX, y0: t.clientY, dx: 0, active: false }
+    }
+
+    const onMove = (e) => {
+      if (!drag) return
+      const t = e.touches[0]
+      const dx = t.clientX - drag.x0
+      const dy = t.clientY - drag.y0
+      if (!drag.active) {
+        if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+          drag = null
+          return
+        }
+        if (Math.abs(dx) < 8) return
+        drag.active = true
+      }
+      const v = drag.from === 1 ? Math.max(0, dx) : Math.min(0, dx)
+      drag.dx = v
+      el.style.transition = 'none'
+      el.style.transform = `translateX(${v * 0.72}px)`
+      el.style.boxShadow = '0 0 28px rgba(0,0,0,.45)'
+    }
+
+    // 只有真的能退一级，才播放滑出动画；根页面直接回弹
+    const canGoBack = () => {
+      const s = stateRef.current
+      return !!(s.job || s.importOpen || s.reader || s.view !== 'shelf')
+    }
+
+    const onEnd = () => {
+      if (!drag) return
+      const d = drag
+      drag = null
+      if (!d.active) return
+      if (Math.abs(d.dx) > THRESHOLD && canGoBack()) {
+        el.style.transition = 'transform .17s cubic-bezier(.4,0,.6,1)'
+        el.style.transform = `translateX(${d.from * 100}%)`
+        window.setTimeout(() => {
+          goBackRef.current()
+          el.style.transition = 'none'
+          el.style.transform = ''
+          window.requestAnimationFrame(() => {
+            el.style.transition = ''
+          })
+        }, 170)
+      } else {
+        reset(true)
+      }
+    }
+
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: true })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+    }
+  }, [])
+
   const jobPct = job ? Math.round(((job.current || 0) / Math.max(1, job.total || 1)) * 100) : 0
 
   return (
-    <div className="app">
+    <div className="app" ref={appRef}>
       {view === 'shelf' && (
         <Shelf
           books={books}

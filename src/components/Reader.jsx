@@ -182,9 +182,16 @@ export function Reader({ book, settings, setSettings, startGlobal, onClose, onPr
     const t = touchRef.current
     if (!t) return
     touchRef.current = null
-    if (vertical) return
     const dx = e.changedTouches[0].clientX - t.x
     const dy = e.changedTouches[0].clientY - t.y
+
+    // 贴着左边缘往右拖 = 退出阅读，优先级高于翻页
+    if (t.x <= 22 && dx > 78 && Math.abs(dy) < 76) {
+      onClose()
+      return
+    }
+
+    if (vertical) return
     if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
       const forwardIsRight = settings.direction === 'rtl'
       const forward = forwardIsRight ? dx > 0 : dx < 0
