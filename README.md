@@ -4,6 +4,9 @@
 
 界面和交互参考了 MH-ARK 的思路（本地仓库 → 自动扫描 → 书架），但实现更轻：一个 WebView 里跑 React，打包成 APK。
 
+- 仓库：https://github.com/madao5205211221/moku-comic
+- APK 下载：仓库的 **Releases** 页面，取最新一版 `moku-apk.apk`
+
 ---
 
 ## 支持什么

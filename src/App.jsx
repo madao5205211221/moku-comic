@@ -127,6 +127,8 @@ export default function App() {
   async function closeReader() {
     const id = reader?.book?.id
     setReader(null)
+    // 等 Reader 卸载时那次进度写入落库，再刷新列表
+    await new Promise((r) => setTimeout(r, 80))
     await refresh()
     if (id && detail?.id === id) {
       const nb = await getBook(id)
